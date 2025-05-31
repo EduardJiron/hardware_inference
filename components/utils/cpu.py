@@ -1,71 +1,77 @@
-from rest_framework import generics
-from ..models.cpu import CPU
-from ..serializers.cpu import CPUInferenceInputSerializer
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from ..serializers.cpu import CPUSerializer
-
-
 def probability_cpus(cpu, criteria):
     score = 0
     explanation = []
 
     # Propósito (peso fuerte)
-    if cpu.purpose == criteria["purpose"]:
+    if criteria.get("purpose") and cpu.purpose == criteria["purpose"]:
         score += 0.25
         explanation.append("✔️ Propósito adecuado para el uso esperado.")
     else:
-        explanation.append(f"❌ Propósito diferente: se esperaba '{criteria['purpose']}', pero este CPU es para '{cpu.purpose}'.")
+        expected = criteria.get("purpose", "no especificado")
+        explanation.append(f"❌ Propósito diferente: se esperaba '{expected}', pero este CPU es para '{cpu.purpose}'.")
 
     # Nivel de performance (peso moderado)
     perf_levels = {"low": 0, "mid": 1, "high": 2, "ultra": 3}
-    requested_level = perf_levels.get(criteria["performance_level"], 1)
+    requested_level = perf_levels.get(criteria.get("performance_level"), 1)
     cpu_level = perf_levels.get(cpu.performance_level, 1)
     diff = abs(cpu_level - requested_level)
 
-    if diff == 0:
-        score += 0.2
-        explanation.append("✔️ Nivel de rendimiento coincide con lo esperado.")
-    elif diff == 1:
-        score += 0.1
-        explanation.append("⚠️ Nivel de rendimiento aceptable, aunque no ideal.")
+    if criteria.get("performance_level") is not None:
+        if diff == 0:
+            score += 0.2
+            explanation.append("✔️ Nivel de rendimiento coincide con lo esperado.")
+        elif diff == 1:
+            score += 0.1
+            explanation.append("⚠️ Nivel de rendimiento aceptable, aunque no ideal.")
+        else:
+            explanation.append("❌ Nivel de rendimiento alejado del requerido.")
     else:
-        explanation.append("❌ Nivel de rendimiento alejado del requerido.")
+        explanation.append("ℹ️ No se especificó nivel de rendimiento en el criterio.")
 
     # Precio (peso moderado)
-    cpu_price = float(cpu.price_usd)
-    if cpu_price <= criteria["max_price_usd"]:
-        score += 0.15
-        explanation.append(f"✔️ Precio dentro del presupuesto (${cpu_price} <= ${criteria['max_price_usd']}).")
+    if "max_price_usd" in criteria and criteria["max_price_usd"] is not None:
+        cpu_price = float(cpu.price_usd)
+        if cpu_price <= criteria["max_price_usd"]:
+            score += 0.15
+            explanation.append(f"✔️ Precio dentro del presupuesto (${cpu_price} <= ${criteria['max_price_usd']}).")
+        else:
+            explanation.append(f"❌ Precio fuera del presupuesto (${cpu_price} > ${criteria['max_price_usd']}).")
     else:
-        explanation.append(f"❌ Precio fuera del presupuesto (${cpu_price} > ${criteria['max_price_usd']}).")
+        explanation.append("ℹ️ No se especificó presupuesto máximo en el criterio.")
 
     # Socket (peso medio)
-    if cpu.socket_type == criteria["socket_type"]:
-        score += 0.15
-        explanation.append("✔️ Compatible con el socket requerido.")
+    if criteria.get("socket_type"):
+        if cpu.socket_type == criteria["socket_type"]:
+            score += 0.15
+            explanation.append("✔️ Compatible con el socket requerido.")
+        else:
+            explanation.append(f"❌ Socket incompatible: se necesita '{criteria['socket_type']}', pero tiene '{cpu.socket_type}'.")
     else:
-        explanation.append(f"❌ Socket incompatible: se necesita '{criteria['socket_type']}', pero tiene '{cpu.socket_type}'.")
+        explanation.append("ℹ️ No se especificó tipo de socket en el criterio.")
 
     # GPU integrada
-    if criteria["integrated_gpu_required"]:
-        if cpu.integrated_gpu:
-            score += 0.1
-            explanation.append("✔️ Incluye GPU integrada, como se requiere.")
+    if criteria.get("integrated_gpu_required") is not None:
+        if criteria["integrated_gpu_required"]:
+            if cpu.integrated_gpu:
+                score += 0.1
+                explanation.append("✔️ Incluye GPU integrada, como se requiere.")
+            else:
+                explanation.append("❌ Se requiere GPU integrada, pero este CPU no la incluye.")
         else:
-            explanation.append("❌ Se requiere GPU integrada, pero este CPU no la incluye.")
+            score += 0.05  # No penaliza si no se requiere
+            explanation.append("✔️ No se requiere GPU integrada, cumple con el criterio.")
     else:
-        score += 0.05  # No penaliza si no se requiere
-        explanation.append("✔️ No se requiere GPU integrada, cumple con el criterio.")
+        explanation.append("ℹ️ No se especificó requisito para GPU integrada.")
 
     # Tipo de memoria
-    if criteria["memory_type"] in cpu.memory_types:
-        score += 0.1
-        explanation.append(f"✔️ Soporta el tipo de memoria requerido ({criteria['memory_type']}).")
+    if criteria.get("memory_type"):
+        if criteria["memory_type"] in cpu.memory_types:
+            score += 0.1
+            explanation.append(f"✔️ Soporta el tipo de memoria requerido ({criteria['memory_type']}).")
+        else:
+            explanation.append(f"❌ No es compatible con la memoria '{criteria['memory_type']}'.")
     else:
-        explanation.append(f"❌ No es compatible con la memoria '{criteria['memory_type']}'.")
+        explanation.append("ℹ️ No se especificó tipo de memoria en el criterio.")
 
     # Núcleos (peso leve)
     if "cores" in criteria and criteria["cores"] is not None:
