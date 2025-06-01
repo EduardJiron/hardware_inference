@@ -1,8 +1,6 @@
 from django.db import models
 
-# ------------------------------
-# RAM
-# ------------------------------
+
 class RAM(models.Model):
     model = models.CharField(max_length=100)
     capacity_gb = models.IntegerField()
